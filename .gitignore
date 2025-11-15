@@ -1,0 +1,17 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual environments
+venv/
+.env/
+
+# Build artifacts (PyInstaller)
+build/
+dist/
+*.spec
+
+# OS junk
+.DS_Store
+Thumbs.db
