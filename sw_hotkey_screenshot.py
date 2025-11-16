@@ -175,6 +175,7 @@ class EnhancedOverlayWindow:
         self.screen_height = 0
         self.click_cooldown = False
         self.highlight_rectangles = []  # Store rectangle IDs for better management
+        self.waiting_for_click = True  # Flag to track if we're waiting for a click
         
     def start(self):
         """Start the overlay window in a separate thread."""
@@ -225,47 +226,54 @@ class EnhancedOverlayWindow:
             
     def _on_click(self, event):
         """Handle mouse click events."""
-        if not self.monitoring_clicks or self.click_cooldown:
+        if not self.monitoring_clicks or self.click_cooldown or not self.waiting_for_click:
             return
             
         # Check if click is within any current highlight
         mouse_x, mouse_y = win32api.GetCursorPos()
         
-        for i, highlight in enumerate(self.current_highlights):
-            x0 = int(highlight['x0'] * self.screen_width)
-            y0 = int(highlight['y0'] * self.screen_height)
-            x1 = int(highlight['x1'] * self.screen_width)
-            y1 = int(highlight['y1'] * self.screen_height)
+        # For single highlight or first highlight in sequence
+        if len(self.current_highlights) == 1:
+            target_highlight = self.current_highlights[0]
+        else:
+            # For multiple highlights, process them in order
+            # Always target the first unprocessed highlight
+            target_highlight = self.current_highlights[0] if self.current_highlights else None
+            
+        if target_highlight:
+            x0 = int(target_highlight['x0'] * self.screen_width)
+            y0 = int(target_highlight['y0'] * self.screen_height)
+            x1 = int(target_highlight['x1'] * self.screen_width)
+            y1 = int(target_highlight['y1'] * self.screen_height)
             
             # Add small tolerance for click detection
             tolerance = 5
             if (x0 - tolerance <= mouse_x <= x1 + tolerance and 
                 y0 - tolerance <= mouse_y <= y1 + tolerance):
                 
-                print(f"\n[✓] Clicked on: {highlight.get('label', 'element')}")
+                print(f"\n[✓] Clicked on: {target_highlight.get('label', 'element')}")
                 
-                # Set cooldown to prevent multiple triggers
+                # Set cooldown and waiting flag
                 self.click_cooldown = True
+                self.waiting_for_click = False
                 self.root.after(1000, self._reset_cooldown)
                 
-                # Clear current highlights
+                # Clear all highlights immediately after click
                 self.canvas.delete("all")
+                self.monitoring_clicks = False
                 
                 # Trigger callback if set
                 if self.click_callback:
-                    self.click_callback(i, highlight)
+                    # Pass the clicked highlight to the callback
+                    self.root.after(100, lambda: self.click_callback(0, target_highlight))
                 
-                # Move to next set of highlights or end
-                if i == len(self.current_highlights) - 1:
-                    self.monitoring_clicks = False
-                    self.current_highlights = []
-                    print("[✓] All steps completed for this instruction")
-                
-                break
+                # Clear the current highlights list
+                self.current_highlights = []
     
     def _reset_cooldown(self):
         """Reset the click cooldown."""
         self.click_cooldown = False
+        self.waiting_for_click = True
     
     def show_highlights_sequential(self, highlights, callback=None):
         """Show highlights and wait for clicks, with automatic screenshot on click."""
@@ -276,9 +284,74 @@ class EnhancedOverlayWindow:
         self.current_index = 0
         self.monitoring_clicks = True
         self.click_callback = callback
+        self.waiting_for_click = True
         
-        # Show all highlights at once for better visibility
-        self._show_all_highlights(highlights)
+        # Show only the first highlight for sequential processing
+        if len(highlights) > 1:
+            # For multiple highlights, show just the first one
+            self._show_single_highlight_enhanced(highlights[0], step_number=1, total_steps=len(highlights))
+        else:
+            # For single highlight, show it normally
+            self._show_all_highlights(highlights)
+    
+    def _show_single_highlight_enhanced(self, highlight, step_number=1, total_steps=1):
+        """Show a single highlight with step counter."""
+        def draw():
+            # Clear previous highlights
+            self.canvas.delete("all")
+            
+            x0 = int(highlight['x0'] * self.screen_width)
+            y0 = int(highlight['y0'] * self.screen_height)
+            x1 = int(highlight['x1'] * self.screen_width)
+            y1 = int(highlight['y1'] * self.screen_height)
+            
+            # Make sure coordinates are valid
+            x0, x1 = min(x0, x1), max(x0, x1)
+            y0, y1 = min(y0, y1), max(y0, y1)
+            
+            # Draw rectangle with better visibility
+            self.canvas.create_rectangle(
+                x0, y0, x1, y1,
+                outline='#00FF00',  # Green for current step
+                width=4,
+                tags="highlight_current"
+            )
+            
+            # Draw a semi-transparent fill
+            self.canvas.create_rectangle(
+                x0, y0, x1, y1,
+                fill='#00FF00',
+                stipple='gray25',
+                outline='',
+                tags="highlight_fill"
+            )
+            
+            # Draw label with step counter
+            label_text = f"Step {step_number}/{total_steps}: {highlight.get('label', 'Click here')}"
+            
+            # Create text with background
+            text_id = self.canvas.create_text(
+                x0 + 5, y0 - 25,
+                text=label_text,
+                fill='white',
+                anchor='nw',
+                font=('Arial', 16, 'bold'),
+                tags="label"
+            )
+            
+            # Get text bounds and draw background
+            bbox = self.canvas.bbox(text_id)
+            if bbox:
+                self.canvas.create_rectangle(
+                    bbox[0]-3, bbox[1]-3, bbox[2]+3, bbox[3]+3,
+                    fill='#00AA00',
+                    outline='',
+                    tags="label_bg"
+                )
+                # Raise text to front
+                self.canvas.tag_raise(text_id)
+                
+        self.root.after(0, draw)
         
     def _show_all_highlights(self, highlights):
         """Show all highlights at once with labels."""
@@ -478,26 +551,81 @@ def handle_f8():
     overlay_window.start()
     
     conversation_history = []
-    auto_screenshot = True  # Enable automatic screenshots by default
+    auto_progression = True  # Enable automatic progression by default
+    current_task = None  # Store the current task/goal
+    steps_completed = 0
     
-    # Define callback for when highlights are clicked
+    # Define callback for when highlights are clicked - this will auto-progress
     def on_highlight_click(index, highlight):
-        nonlocal b64_image
+        nonlocal b64_image, steps_completed
         global current_screenshot_data
-        if auto_screenshot:
-            print(f"[✓] Taking new screenshot after clicking {highlight.get('label', 'element')}...")
-            time.sleep(0.5)  # Small delay to let UI update
-            b64_image = screenshot_manager.capture_screen()
-            current_screenshot_data = b64_image
+        
+        print(f"\n[✓] Step {steps_completed + 1} completed: Clicked {highlight.get('label', 'element')}")
+        steps_completed += 1
+        
+        # Take a new screenshot after click
+        time.sleep(0.5)  # Small delay to let UI update
+        print("[📸] Capturing new screenshot...")
+        b64_image = screenshot_manager.capture_screen()
+        current_screenshot_data = b64_image
+        
+        # Clear current highlights
+        overlay_window.clear_highlights()
+        
+        if auto_progression and current_task:
+            # Automatically continue to next step
+            time.sleep(0.3)  # Brief pause
+            print("\n[🔄] Analyzing screen for next step...")
+            
+            # Ask AI for the next step
+            continuation_message = (
+                f"I just clicked on '{highlight.get('label', 'element')}'. "
+                f"What's the next step to {current_task}? "
+                "If there are more UI buttons to click, highlight them. "
+                "If we've reached a point where I need to sketch or type something, let me know."
+            )
+            
+            try:
+                ai_response = send_to_ai(b64_image, conversation_history, continuation_message)
+                clean_response, new_highlights = extract_highlights(ai_response)
+                
+                # Update conversation history
+                conversation_history.append(("user", continuation_message))
+                conversation_history.append(("assistant", clean_response))
+                
+                print("\n🤖 ERICAD (Next Step):\n")
+                print("─" * 40)
+                print(clean_response)
+                print("─" * 40)
+                
+                if new_highlights:
+                    print(f"\n[✓] Highlighting {len(new_highlights)} element(s) for next step")
+                    print("[!] Click the highlighted area to continue")
+                    
+                    # Show new highlights with the same callback for continuous progression
+                    overlay_window.show_highlights_sequential(
+                        new_highlights,
+                        callback=on_highlight_click
+                    )
+                else:
+                    print("\n[📝] No more buttons to click. Ready for manual input or sketching.")
+                    print("[!] Type your next question or describe what you've done.")
+                    
+            except Exception as e:
+                print(f"\n[ERROR] Failed to get next step: {e}")
+                print("[!] Please type your next instruction manually.")
     
     print(
         "\n" + "="*60
-        + "\nERICAD Tutorial Assistant - Enhanced Version"
+        + "\nERICAD Tutorial Assistant - Auto-Progression Mode"
         + "\n" + "="*60
         + "\n\n📸 Screenshot captured! Chat session started."
+        + "\n\n🚀 AUTO-PROGRESSION MODE: The assistant will automatically"
+        + "\n   guide you through each step after you click highlighted buttons."
         + "\n\nCommands:"
         + "\n  /done, /exit  - End this session"
-        + "\n  /auto         - Toggle automatic screenshot on click (currently ON)"
+        + "\n  /pause        - Pause auto-progression"
+        + "\n  /resume       - Resume auto-progression"
         + "\n  /save         - Save current screenshot to desktop"
         + "\n  /new          - Take a new screenshot manually"
         + "\n  /clear        - Clear all highlights"
@@ -513,10 +641,14 @@ def handle_f8():
             print("\n[✓] Session ended. Press F8 for a new session, or F9 to quit.\n")
             break
             
-        if user_message.lower() == "/auto":
-            auto_screenshot = not auto_screenshot
-            status = "ON" if auto_screenshot else "OFF"
-            print(f"[✓] Automatic screenshot on click is now: {status}\n")
+        if user_message.lower() == "/pause":
+            auto_progression = False
+            print("[⏸️] Auto-progression paused. Click highlights manually.\n")
+            continue
+            
+        if user_message.lower() == "/resume":
+            auto_progression = True
+            print("[▶️] Auto-progression resumed.\n")
             continue
             
         if user_message.lower() == "/save":
@@ -541,6 +673,10 @@ def handle_f8():
         if not user_message:
             continue
 
+        # Store the current task for auto-progression
+        current_task = user_message
+        steps_completed = 0
+
         try:
             print("\n🤔 ERICAD is analyzing...")
             ai_response = send_to_ai(b64_image, conversation_history, user_message)
@@ -562,15 +698,16 @@ def handle_f8():
 
         # Show highlights if any
         if highlights:
-            print(f"\n[✓] Highlighting {len(highlights)} element(s) on screen")
-            print("[!] Click the highlighted areas to proceed")
-            if auto_screenshot:
-                print("[!] A new screenshot will be taken after each click")
+            print(f"\n[✓] Step 1: Highlighting {len(highlights)} element(s)")
+            print("[!] Click the highlighted area to start auto-progression")
+            print("[💡] The system will automatically guide you through each step")
             
             overlay_window.show_highlights_sequential(
                 highlights, 
-                callback=on_highlight_click if auto_screenshot else None
+                callback=on_highlight_click if auto_progression else None
             )
+        else:
+            print("\n[📝] No UI elements to highlight. Please follow the text instructions.")
         else:
             print("\n[Note] No UI elements to highlight in this response")
 
@@ -578,16 +715,25 @@ def main():
     global overlay_window
     
     print("\n" + "="*60)
-    print(" ERICAD - Enhanced SolidWorks Tutorial Assistant")
+    print(" ERICAD - Auto-Progression SolidWorks Tutorial Assistant")
     print("="*60)
-    print("\n📌 Features:")
-    print("  • Better highlight accuracy with precise coordinate mapping")
-    print("  • Automatic screenshot capture when you click highlighted areas")
-    print("  • Screenshots kept in memory (not saved unless requested)")
-    print("  • Multi-step guidance with sequential highlighting")
+    print("\n🚀 KEY FEATURES:")
+    print("  • AUTO-PROGRESSION: Click once, and the system guides you")
+    print("    through all steps automatically")
+    print("  • After each click, takes a screenshot and shows next step")
+    print("  • Continues until manual input is needed (sketching/typing)")
+    print("  • Precise highlight boxes with step counters")
+    print("  • All screenshots kept in memory (not saved to disk)")
+    print("\n📌 How it works:")
+    print("  1. Tell the assistant what you want to create")
+    print("  2. Click the highlighted button")
+    print("  3. System automatically captures screen & shows next step")
+    print("  4. Keep clicking highlights until you need to sketch/type")
     print("\n🎮 Controls:")
     print("  • Press F8 to start a tutorial session")
     print("  • Press F9 to quit the program")
+    print("  • Use /pause to stop auto-progression")
+    print("  • Use /resume to restart auto-progression")
     print("\n" + "="*60 + "\n")
 
     keyboard.add_hotkey("F8", handle_f8)
