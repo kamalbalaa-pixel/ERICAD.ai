@@ -14,8 +14,16 @@ import mss.tools
 import keyboard
 import base64 
 from openai import OpenAI
+import json
+import re
+import tkinter as tk
+import win32gui
+import win32con
+import threading
+import time
 
 MODEL_NAME = "gpt-5.1"
+overlay_window = None
 
 ERICAD_SYSTEM_PROMPT = (
 """
@@ -99,17 +107,127 @@ Say naturally:
 - Never restate the user’s description.
 - Never write long paragraphs.
 
-8) OPTIONAL HIGHLIGHT JSON (only if requested in prompt)
-If the user or system requests UI highlights, append a fenced JSON block:
+8) HIGHLIGHT JSON (IMPORTANT)
+When you mention ANY specific UI element that the user should click or interact with, 
+you MUST append a JSON block with highlight coordinates at the end of your response.
+
+The format is:
 ```json
 {
   "highlights": [
-    { "label": "name", "x0": 0.32, "y0": 0.20, "x1": 0.41, "y1": 0.27 }
+    { "label": "Sketch button", "x0": 0.32, "y0": 0.20, "x1": 0.41, "y1": 0.27 }
   ]
 }
 """    
 )
 
+```python
+class OverlayWindow:
+    """Transparent overlay window for drawing highlights on screen."""
+
+    def handle_f8():
+    """
+    F8 handler: start a chat session tied to a single screenshot.
+
+    You can send multiple messages until you type /done, /exit, or /new.
+    """
+    global overlay_window  # ADD THIS LINE
+  
+    def __init__(self):
+        self.root = None
+        self.canvas = None
+        self.highlights = []
+        self.running = False
+        
+    def start(self):
+        """Start the overlay window in a separate thread."""
+        self.thread = threading.Thread(target=self._run)
+        self.thread.daemon = True
+        self.thread.start()
+        time.sleep(0.5)  # Give the window time to initialize
+        
+    def _run(self):
+        """Run the tkinter window."""
+        self.root = tk.Tk()
+        self.root.title("ERICAD Overlay")
+        
+        # Make window fullscreen and transparent
+        self.root.attributes('-fullscreen', True)
+        self.root.attributes('-topmost', True)
+        self.root.attributes('-alpha', 0.3)
+        self.root.configure(bg='black')
+        
+        # Make window click-through
+        self.root.wm_attributes('-transparentcolor', 'black')
+        
+        # Create canvas
+        self.canvas = tk.Canvas(
+            self.root, 
+            bg='black', 
+            highlightthickness=0,
+            width=self.root.winfo_screenwidth(),
+            height=self.root.winfo_screenheight()
+        )
+        self.canvas.pack()
+        
+        self.running = True
+        self.root.after(100, self._update)
+        self.root.mainloop()
+        
+    def _update(self):
+        """Update the overlay display."""
+        if self.running:
+            self.root.after(100, self._update)
+            
+    def show_highlights(self, highlights, duration=5):
+        """Show highlights on screen for a specified duration."""
+        if not self.running or not self.canvas:
+            return
+            
+        def draw():
+            # Clear previous highlights
+            self.canvas.delete("all")
+            
+            # Get screen dimensions
+            screen_width = self.root.winfo_screenwidth()
+            screen_height = self.root.winfo_screenheight()
+            
+            # Draw new highlights
+            for h in highlights:
+                x0 = int(h['x0'] * screen_width)
+                y0 = int(h['y0'] * screen_height)
+                x1 = int(h['x1'] * screen_width)
+                y1 = int(h['y1'] * screen_height)
+                
+                # Draw rectangle
+                self.canvas.create_rectangle(
+                    x0, y0, x1, y1,
+                    outline='red',
+                    width=3,
+                    tags="highlight"
+                )
+                
+                # Draw label if exists
+                if 'label' in h:
+                    self.canvas.create_text(
+                        x0, y0 - 5,
+                        text=h['label'],
+                        fill='red',
+                        anchor='sw',
+                        font=('Arial', 12, 'bold'),
+                        tags="highlight"
+                    )
+            
+            # Schedule removal
+            self.root.after(duration * 1000, lambda: self.canvas.delete("highlight"))
+            
+        self.root.after(0, draw)
+        
+    def stop(self):
+        """Stop the overlay window."""
+        self.running = False
+        if self.root:
+            self.root.quit()
 
 def get_desktop_path() -> str:
     """Return your Desktop path (normal or OneDrive)."""
@@ -147,6 +265,28 @@ def image_path_to_b64(image_path: str) -> str:
     with open(image_path, "rb") as image_file:
         return base64.b64encode(image_file.read()).decode("utf-8")
 
+def extract_highlights(ai_response: str) -> tuple:
+    """Extract highlight JSON from AI response and return (clean_response, highlights)."""
+    # Look for JSON block
+    json_pattern = r'```json\s*(.*?)\s*```'
+    match = re.search(json_pattern, ai_response, re.DOTALL)
+    
+    if match:
+        try:
+            json_str = match.group(1)
+            highlight_data = json.loads(json_str)
+            highlights = highlight_data.get('highlights', [])
+            
+            # Remove JSON block from response
+            clean_response = ai_response[:match.start()] + ai_response[match.end():]
+            clean_response = clean_response.strip()
+            
+            return clean_response, highlights
+        except json.JSONDecodeError:
+            print("[Warning] Could not parse highlight JSON")
+            return ai_response, []
+    
+    return ai_response, []
 
 def send_to_ai(
     b64_image: str,
@@ -174,6 +314,7 @@ def send_to_ai(
         + "New user message:\n"
         + user_message
         + "\n\nUse the screenshot and the conversation context to respond."
+        + "\n\nIMPORTANT: Include highlight JSON for any UI elements you mention."  
     )
 
     client = OpenAI()
@@ -246,24 +387,45 @@ def handle_f8():
         conversation_history.append(("user", user_message))
         conversation_history.append(("assistant", ai_response))
 
+        # Extract highlights from response
+        clean_response, highlights = extract_highlights(ai_response)
+
+        # Update conversation history with clean response
+        conversation_history.append(("user", user_message))
+        conversation_history.append(("assistant", clean_response))
+
         print("\nERICAD:\n")
-        print(ai_response)
+        print(clean_response)
         print("\n-----------------------------\n")
+
+        # Show highlights if any
+        if highlights and overlay_window:
+            overlay_window.show_highlights(highlights, duration=5)
 
 
 def main():
+    global overlay_window
+    
     print("ERICAD Hotkey Tool Running (Chat Mode)")
     print("Press F8 to capture + start a chat for that screenshot.")
     print("Inside a session, type /done to end it.")
     print("Press F9 to quit the program.\n")
+    
+    # Initialize overlay window
+    overlay_window = OverlayWindow()
+    overlay_window.start()
 
     keyboard.add_hotkey("F8", handle_f8)
 
     # Wait until F9 is pressed
     keyboard.wait("F9")
+    
+    # Clean up
+    if overlay_window:
+        overlay_window.stop()
+    
     print("\n[✓] Quitting ERICAD...")
     raise SystemExit
-
 
 if __name__ == "__main__":
     main()
