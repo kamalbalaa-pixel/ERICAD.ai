@@ -708,8 +708,6 @@ def handle_f8():
             )
         else:
             print("\n[📝] No UI elements to highlight. Please follow the text instructions.")
-        else:
-            print("\n[Note] No UI elements to highlight in this response")
 
 def main():
     global overlay_window
