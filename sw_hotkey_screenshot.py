@@ -110,16 +110,35 @@ Say naturally:
 - Never write long paragraphs.
 
 8) HIGHLIGHT JSON (IMPORTANT)
-```python
-The format is:
-\`\`\`json
+When you want to visually point the user to a UI element or region, 
+you MUST include a JSON block exactly in this format:
+
+```json
 {
   "highlights": [
-    { "label": "Sketch button", "x0": 0.32, "y0": 0.20, "x1": 0.41, "y1": 0.27 }
+    { 
+      "label": "Exit Sketch",
+      "x0": 0.72,
+      "y0": 0.10,
+      "x1": 0.80,
+      "y1": 0.16
+    }
   ]
 }
-\`\`\`
-"""    
+Requirements:
+
+x0, y0, x1, y1 are normalized coordinates in the range [0.0, 1.0].
+
+(0.0, 0.0) is the top-left corner of the screenshot.
+
+(1.0, 1.0) is the bottom-right corner of the screenshot.
+
+NEVER use pixel coordinates.
+
+Keep boxes as tight as possible around the button or UI element, not half the ribbon.
+
+If you are not at least 80% sure, return "highlights": [].
+"""
 )
 
 class OverlayWindow:
@@ -179,95 +198,104 @@ class OverlayWindow:
             
     def _check_for_click(self):
         """Check if mouse was clicked in the highlighted area."""
-        if not self.current_highlights or self.current_index >= len(self.current_highlights):
-            return
-            
-        # Get current mouse state
-        if win32api.GetAsyncKeyState(win32con.VK_LBUTTON) & 0x8000:
-            # Get mouse position
-            x, y = win32api.GetCursorPos()
-            screen_width = self.root.winfo_screenwidth()
-            screen_height = self.root.winfo_screenheight()
-            
-            # Check if click is within current highlight
-            current = self.current_highlights[self.current_index]
-            x0 = int(current['x0'] * screen_width)
-            y0 = int(current['y0'] * screen_height)
-            x1 = int(current['x1'] * screen_width)
-            y1 = int(current['y1'] * screen_height)
-            
-            if x0 <= x <= x1 and y0 <= y <= y1:
-                # Click detected in highlighted area
-                self.click_detected = True
-                # Move to next highlight after a short delay
-                self.root.after(500, self._next_highlight)
-    
+      if not self.current_highlights or self.current_index >= len(self.current_highlights):
+          return
+  
+      # Left mouse button down
+      if win32api.GetAsyncKeyState(win32con.VK_LBUTTON) & 0x8000:
+          x, y = win32api.GetCursorPos()
+          screen_width = self.root.winfo_screenwidth()
+          screen_height = self.root.winfo_screenheight()
+  
+          current = self.current_highlights[self.current_index]
+          x0 = int(current['x0'] * screen_width)
+          y0 = int(current['y0'] * screen_height)
+          x1 = int(current['x1'] * screen_width)
+          y1 = int(current['y1'] * screen_height)
+  
+          if x0 <= x <= x1 and y0 <= y <= y1:
+              # Click detected in highlighted area
+              self.click_detected = True
+              self.root.after(500, self._next_highlight)
+      
     def show_highlights_sequential(self, highlights):
-        """Show highlights one at a time, waiting for clicks."""
-        if not highlights:
-            return
-            
-        self.current_highlights = highlights
-        self.current_index = 0
-        self.monitoring_clicks = True
-        
-        # Show first highlight
-        self._show_single_highlight(0)
+      """Show highlights one at a time, waiting for clicks."""
+      if not highlights or not self.running or not self.canvas:
+          return
+
+    # Get screen dimensions
+      screen_width = self.root.winfo_screenwidth()
+      screen_height = self.root.winfo_screenheight()
+
+    # 🔥 Sanitize once and store
+      self.current_highlights = sanitize_highlights(highlights, screen_width, screen_height)
+      if not self.current_highlights:
+          return
+
+      self.current_index = 0
+      self.monitoring_clicks = True
+
+    # Show first highlight
+      self._show_single_highlight(0)
+
         
     def _show_single_highlight(self, index):
-        """Show a single highlight by index."""
-        if index >= len(self.current_highlights):
-            # All highlights shown
-            self.monitoring_clicks = False
-            self.canvas.delete("all")
-            return
-            
-        def draw():
-            # Clear previous highlights
-            self.canvas.delete("all")
-            
-            # Get screen dimensions
-            screen_width = self.root.winfo_screenwidth()
-            screen_height = self.root.winfo_screenheight()
-            
-            # Draw current highlight
-            h = self.current_highlights[index]
-            x0 = int(h['x0'] * screen_width)
-            y0 = int(h['y0'] * screen_height)
-            x1 = int(h['x1'] * screen_width)
-            y1 = int(h['y1'] * screen_height)
-            
-            # Draw rectangle
-            self.canvas.create_rectangle(
-                x0, y0, x1, y1,
-                outline='red',
-                width=3,
-                tags="highlight"
-            )
-            
-            # Draw label if exists
-            if 'label' in h:
-                self.canvas.create_text(
-                    x0, y0 - 5,
-                    text=h['label'],
-                    fill='red',
-                    anchor='sw',
-                    font=('Arial', 12, 'bold'),
-                    tags="highlight"
-                )
-                
-            # Add step counter
-            self.canvas.create_text(
-                x1, y1 + 5,
-                text=f"Step {index + 1} of {len(self.current_highlights)}",
-                fill='yellow',
-                anchor='ne',
-                font=('Arial', 10),
-                tags="highlight"
-            )
-            
-        self.root.after(0, draw)
-        
+      """Show a single highlight by index."""
+      if index >= len(self.current_highlights):
+        # All highlights shown
+          self.monitoring_clicks = False
+          if self.canvas:
+              self.canvas.delete("all")
+          return
+
+      def draw():
+          if not self.canvas:
+              return
+
+        # Clear previous highlights
+          self.canvas.delete("all")
+
+          screen_width = self.root.winfo_screenwidth()
+          screen_height = self.root.winfo_screenheight()
+
+        # Current highlight (already sanitized)
+          h = self.current_highlights[index]
+          x0 = int(h['x0'] * screen_width)
+          y0 = int(h['y0'] * screen_height)
+          x1 = int(h['x1'] * screen_width)
+          y1 = int(h['y1'] * screen_height)
+
+        # Draw rectangle
+          self.canvas.create_rectangle(
+              x0, y0, x1, y1,
+              outline='red',
+              width=3,
+              tags="highlight"
+          )
+  
+          # Draw label if exists
+          if 'label' in h:
+              self.canvas.create_text(
+                  x0, y0 - 5,
+                  text=h['label'],
+                  fill='red',
+                  anchor='sw',
+                  font=('Arial', 12, 'bold'),
+                  tags="highlight"
+              )
+  
+          # Add step counter
+          self.canvas.create_text(
+              x1, y1 + 5,
+              text=f"Step {index + 1} of {len(self.current_highlights)}",
+              fill='yellow',
+              anchor='ne',
+              font=('Arial', 10),
+              tags="highlight"
+          )
+  
+      self.root.after(0, draw)
+          
     def _next_highlight(self):
         """Move to the next highlight."""
         self.current_index += 1
@@ -275,53 +303,109 @@ class OverlayWindow:
         
     def show_highlights(self, highlights, duration=5):
         """Show all highlights at once for a specified duration (original method)."""
-        if not self.running or not self.canvas:
-            return
-            
-        def draw():
-            # Clear previous highlights
-            self.canvas.delete("all")
-            
-            # Get screen dimensions
-            screen_width = self.root.winfo_screenwidth()
-            screen_height = self.root.winfo_screenheight()
-            
-            # Draw new highlights
-            for h in highlights:
-                x0 = int(h['x0'] * screen_width)
-                y0 = int(h['y0'] * screen_height)
-                x1 = int(h['x1'] * screen_width)
-                y1 = int(h['y1'] * screen_height)
-                
-                # Draw rectangle
-                self.canvas.create_rectangle(
-                    x0, y0, x1, y1,
-                    outline='red',
-                    width=3,
-                    tags="highlight"
-                )
-                
-                # Draw label if exists
-                if 'label' in h:
-                    self.canvas.create_text(
-                        x0, y0 - 5,
-                        text=h['label'],
-                        fill='red',
-                        anchor='sw',
-                        font=('Arial', 12, 'bold'),
-                        tags="highlight"
-                    )
-            
-            # Schedule removal
-            self.root.after(duration * 1000, lambda: self.canvas.delete("highlight"))
-            
-        self.root.after(0, draw)
-        
+      if not self.running or not self.canvas or not highlights:
+          return
+  
+      def draw():
+          self.canvas.delete("all")
+  
+          screen_width = self.root.winfo_screenwidth()
+          screen_height = self.root.winfo_screenheight()
+  
+          # 🔥 Sanitize list for all-at-once mode
+          safe_highlights = sanitize_highlights(highlights, screen_width, screen_height)
+  
+          for h in safe_highlights:
+              x0 = int(h['x0'] * screen_width)
+              y0 = int(h['y0'] * screen_height)
+              x1 = int(h['x1'] * screen_width)
+              y1 = int(h['y1'] * screen_height)
+  
+              self.canvas.create_rectangle(
+                  x0, y0, x1, y1,
+                  outline='red',
+                  width=3,
+                  tags="highlight"
+              )
+  
+              if 'label' in h:
+                  self.canvas.create_text(
+                      x0, y0 - 5,
+                      text=h['label'],
+                      fill='red',
+                      anchor='sw',
+                      font=('Arial', 12, 'bold'),
+                      tags="highlight"
+                  )
+  
+          self.root.after(duration * 1000, lambda: self.canvas.delete("highlight"))
+  
+      self.root.after(0, draw)
+          
     def stop(self):
         """Stop the overlay window."""
         self.running = False
         if self.root:
             self.root.quit()
+
+
+
+
+def sanitize_highlights(highlights, screen_width, screen_height):
+    """Normalize and clamp highlight coordinates to [0,1], shrink boxes a bit."""
+    sanitized = []
+
+    for h in highlights:
+        try:
+            x0 = float(h.get("x0", 0.0))
+            y0 = float(h.get("y0", 0.0))
+            x1 = float(h.get("x1", 0.0))
+            y1 = float(h.get("y1", 0.0))
+        except (TypeError, ValueError):
+            continue  # skip bad entries
+
+        # Detect if these look like pixel coordinates
+        # (arbitrary heuristic: anything > 2 is probably pixels, not normalized)
+        max_val = max(x0, y0, x1, y1)
+        if max_val > 2.0:
+            # Convert from pixels -> normalized using screen size
+            x0 /= screen_width
+            x1 /= screen_width
+            y0 /= screen_height
+            y1 /= screen_height
+
+        # Clamp to [0,1]
+        x0 = max(0.0, min(1.0, x0))
+        x1 = max(0.0, min(1.0, x1))
+        y0 = max(0.0, min(1.0, y0))
+        y1 = max(0.0, min(1.0, y1))
+
+        # Ensure x0 <= x1, y0 <= y1
+        if x1 < x0:
+            x0, x1 = x1, x0
+        if y1 < y0:
+            y0, y1 = y1, y0
+
+        # Optional: shrink box around its center to avoid huge boxes
+        shrink = 0.7  # 70% size of original
+        cx = (x0 + x1) / 2.0
+        cy = (y0 + y1) / 2.0
+        half_w = (x1 - x0) * shrink / 2.0
+        half_h = (y1 - y0) * shrink / 2.0
+        x0 = max(0.0, cx - half_w)
+        x1 = min(1.0, cx + half_w)
+        y0 = max(0.0, cy - half_h)
+        y1 = min(1.0, cy + half_h)
+
+        h_fixed = dict(h)
+        h_fixed["x0"] = x0
+        h_fixed["y0"] = y0
+        h_fixed["x1"] = x1
+        h_fixed["y1"] = y1
+
+        sanitized.append(h_fixed)
+
+    return sanitized
 
 def get_desktop_path() -> str:
     """Return your Desktop path (normal or OneDrive)."""
