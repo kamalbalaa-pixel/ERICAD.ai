@@ -323,6 +323,17 @@ class OverlayWindow:
         if self.root:
             self.root.quit()
 
+def get_desktop_path() -> str:
+    """Return your Desktop path (normal or OneDrive)."""
+    candidates = [
+        os.path.join(os.path.expanduser("~"), "Desktop"),
+        os.path.join(os.path.expanduser("~"), "OneDrive", "Desktop"),
+        os.path.join(os.path.expanduser("~"), "OneDrive - Personal", "Desktop"),
+    ]
+    for path in candidates:
+        if os.path.exists(path):
+            return path
+    raise RuntimeError("Could not find your Desktop folder.")
 
 def capture_screen():
     """Capture the screen, save a timestamped PNG, and return its path."""
