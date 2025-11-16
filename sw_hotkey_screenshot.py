@@ -21,6 +21,8 @@ import win32gui
 import win32con
 import threading
 import time
+import win32api
+import win32con
 
 MODEL_NAME = "gpt-5.1"
 overlay_window = None
@@ -122,73 +124,175 @@ The format is:
 
 class OverlayWindow:
     """Transparent overlay window for drawing highlights on screen."""
-
+    
     def __init__(self):
         self.root = None
         self.canvas = None
         self.highlights = []
+        self.current_highlights = []
+        self.current_index = 0
         self.running = False
-
+        self.click_detected = False
+        self.monitoring_clicks = False
+        
     def start(self):
         """Start the overlay window in a separate thread."""
         self.thread = threading.Thread(target=self._run)
         self.thread.daemon = True
         self.thread.start()
         time.sleep(0.5)  # Give the window time to initialize
-
+        
     def _run(self):
         """Run the tkinter window."""
         self.root = tk.Tk()
         self.root.title('ERICAD Overlay')
-
+        
         # Make window fullscreen and transparent
         self.root.attributes('-fullscreen', True)
         self.root.attributes('-topmost', True)
         self.root.attributes('-alpha', 0.3)
         self.root.configure(bg='black')
-
+        
         # Make window click-through
         self.root.wm_attributes('-transparentcolor', 'black')
-
+        
         # Create canvas
         self.canvas = tk.Canvas(
-            self.root,
-            bg='black',
+            self.root, 
+            bg='black', 
             highlightthickness=0,
             width=self.root.winfo_screenwidth(),
             height=self.root.winfo_screenheight()
         )
         self.canvas.pack()
-
+        
         self.running = True
         self.root.after(100, self._update)
         self.root.mainloop()
-
+        
     def _update(self):
         """Update the overlay display."""
         if self.running:
+            if self.monitoring_clicks:
+                self._check_for_click()
             self.root.after(100, self._update)
-
-    def show_highlights(self, highlights, duration=5):
-        """Show highlights on screen for a specified duration."""
-        if not self.running or not self.canvas:
+            
+    def _check_for_click(self):
+        """Check if mouse was clicked in the highlighted area."""
+        if not self.current_highlights or self.current_index >= len(self.current_highlights):
             return
-
+            
+        # Get current mouse state
+        if win32api.GetAsyncKeyState(win32con.VK_LBUTTON) & 0x8000:
+            # Get mouse position
+            x, y = win32api.GetCursorPos()
+            screen_width = self.root.winfo_screenwidth()
+            screen_height = self.root.winfo_screenheight()
+            
+            # Check if click is within current highlight
+            current = self.current_highlights[self.current_index]
+            x0 = int(current['x0'] * screen_width)
+            y0 = int(current['y0'] * screen_height)
+            x1 = int(current['x1'] * screen_width)
+            y1 = int(current['y1'] * screen_height)
+            
+            if x0 <= x <= x1 and y0 <= y <= y1:
+                # Click detected in highlighted area
+                self.click_detected = True
+                # Move to next highlight after a short delay
+                self.root.after(500, self._next_highlight)
+    
+    def show_highlights_sequential(self, highlights):
+        """Show highlights one at a time, waiting for clicks."""
+        if not highlights:
+            return
+            
+        self.current_highlights = highlights
+        self.current_index = 0
+        self.monitoring_clicks = True
+        
+        # Show first highlight
+        self._show_single_highlight(0)
+        
+    def _show_single_highlight(self, index):
+        """Show a single highlight by index."""
+        if index >= len(self.current_highlights):
+            # All highlights shown
+            self.monitoring_clicks = False
+            self.canvas.delete("all")
+            return
+            
         def draw():
             # Clear previous highlights
             self.canvas.delete("all")
-
+            
             # Get screen dimensions
             screen_width = self.root.winfo_screenwidth()
             screen_height = self.root.winfo_screenheight()
-
+            
+            # Draw current highlight
+            h = self.current_highlights[index]
+            x0 = int(h['x0'] * screen_width)
+            y0 = int(h['y0'] * screen_height)
+            x1 = int(h['x1'] * screen_width)
+            y1 = int(h['y1'] * screen_height)
+            
+            # Draw rectangle
+            self.canvas.create_rectangle(
+                x0, y0, x1, y1,
+                outline='red',
+                width=3,
+                tags="highlight"
+            )
+            
+            # Draw label if exists
+            if 'label' in h:
+                self.canvas.create_text(
+                    x0, y0 - 5,
+                    text=h['label'],
+                    fill='red',
+                    anchor='sw',
+                    font=('Arial', 12, 'bold'),
+                    tags="highlight"
+                )
+                
+            # Add step counter
+            self.canvas.create_text(
+                x1, y1 + 5,
+                text=f"Step {index + 1} of {len(self.current_highlights)}",
+                fill='yellow',
+                anchor='ne',
+                font=('Arial', 10),
+                tags="highlight"
+            )
+            
+        self.root.after(0, draw)
+        
+    def _next_highlight(self):
+        """Move to the next highlight."""
+        self.current_index += 1
+        self._show_single_highlight(self.current_index)
+        
+    def show_highlights(self, highlights, duration=5):
+        """Show all highlights at once for a specified duration (original method)."""
+        if not self.running or not self.canvas:
+            return
+            
+        def draw():
+            # Clear previous highlights
+            self.canvas.delete("all")
+            
+            # Get screen dimensions
+            screen_width = self.root.winfo_screenwidth()
+            screen_height = self.root.winfo_screenheight()
+            
             # Draw new highlights
             for h in highlights:
                 x0 = int(h['x0'] * screen_width)
                 y0 = int(h['y0'] * screen_height)
                 x1 = int(h['x1'] * screen_width)
                 y1 = int(h['y1'] * screen_height)
-
+                
                 # Draw rectangle
                 self.canvas.create_rectangle(
                     x0, y0, x1, y1,
@@ -196,7 +300,7 @@ class OverlayWindow:
                     width=3,
                     tags="highlight"
                 )
-
+                
                 # Draw label if exists
                 if 'label' in h:
                     self.canvas.create_text(
@@ -207,29 +311,17 @@ class OverlayWindow:
                         font=('Arial', 12, 'bold'),
                         tags="highlight"
                     )
-
+            
             # Schedule removal
             self.root.after(duration * 1000, lambda: self.canvas.delete("highlight"))
-
+            
         self.root.after(0, draw)
-
+        
     def stop(self):
         """Stop the overlay window."""
         self.running = False
         if self.root:
             self.root.quit()
-
-def get_desktop_path() -> str:
-    """Return your Desktop path (normal or OneDrive)."""
-    candidates = [
-        os.path.join(os.path.expanduser("~"), "Desktop"),
-        os.path.join(os.path.expanduser("~"), "OneDrive", "Desktop"),
-        os.path.join(os.path.expanduser("~"), "OneDrive - Personal", "Desktop"),
-    ]
-    for path in candidates:
-        if os.path.exists(path):
-            return path
-    raise RuntimeError("Could not find your Desktop folder.")
 
 
 def capture_screen():
@@ -338,6 +430,8 @@ def handle_f8():
 
     You can send multiple messages until you type /done, /exit, or /new.
     """
+    global overlay_window
+    
     image_path = capture_screen()
 
     try:
@@ -347,11 +441,14 @@ def handle_f8():
         return
 
     conversation_history = []
+    sequential_mode = True  # Default to sequential highlighting
 
     print(
         "\nERICAD chat session started for this screenshot."
         "\nType your question or description below."
-        "\nType /done, /exit, or /new to end this session.\n"
+        "\nCommands: /done, /exit, /new to end session"
+        "\n         /mode to toggle between sequential and all-at-once highlighting"
+        "\n"
     )
 
     while True:
@@ -361,6 +458,12 @@ def handle_f8():
             print("\n[✓] Ending ERICAD session for this screenshot.")
             print("[Hint] Press F8 to start a new session, or F9 to quit.\n")
             break
+
+        if user_message.lower() == "/mode":
+            sequential_mode = not sequential_mode
+            mode = "sequential" if sequential_mode else "all at once"
+            print(f"[✓] Highlighting mode changed to: {mode}\n")
+            continue
 
         if not user_message:
             # ignore blank lines
@@ -372,10 +475,6 @@ def handle_f8():
             print("\n[ERROR] Something went wrong talking to ERICAD:")
             print(e)
             break
-
-        # Update conversation history
-        conversation_history.append(("user", user_message))
-        conversation_history.append(("assistant", ai_response))
 
         # Extract highlights from response
         clean_response, highlights = extract_highlights(ai_response)
@@ -390,7 +489,11 @@ def handle_f8():
 
         # Show highlights if any
         if highlights and overlay_window:
-            overlay_window.show_highlights(highlights, duration=5)
+            if sequential_mode and len(highlights) > 1:
+                print("[Highlighting steps sequentially - click each highlighted button to proceed]")
+                overlay_window.show_highlights_sequential(highlights)
+            else:
+                overlay_window.show_highlights(highlights, duration=5)
 
 
 def main():
