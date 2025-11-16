@@ -482,7 +482,8 @@ def handle_f8():
     
     # Define callback for when highlights are clicked
     def on_highlight_click(index, highlight):
-        nonlocal b64_image, current_screenshot_data
+        nonlocal b64_image
+        global current_screenshot_data
         if auto_screenshot:
             print(f"[✓] Taking new screenshot after clicking {highlight.get('label', 'element')}...")
             time.sleep(0.5)  # Small delay to let UI update
