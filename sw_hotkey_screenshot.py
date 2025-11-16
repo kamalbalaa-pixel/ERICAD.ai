@@ -108,97 +108,87 @@ Say naturally:
 - Never write long paragraphs.
 
 8) HIGHLIGHT JSON (IMPORTANT)
-When you mention ANY specific UI element that the user should click or interact with, 
-you MUST append a JSON block with highlight coordinates at the end of your response.
-
+```python
 The format is:
-```json
+\`\`\`json
 {
   "highlights": [
     { "label": "Sketch button", "x0": 0.32, "y0": 0.20, "x1": 0.41, "y1": 0.27 }
   ]
 }
+\`\`\`
 """    
 )
 
-```python
 class OverlayWindow:
     """Transparent overlay window for drawing highlights on screen."""
 
-    def handle_f8():
-    """
-    F8 handler: start a chat session tied to a single screenshot.
-
-    You can send multiple messages until you type /done, /exit, or /new.
-    """
-    global overlay_window  # ADD THIS LINE
-  
     def __init__(self):
         self.root = None
         self.canvas = None
         self.highlights = []
         self.running = False
-        
+
     def start(self):
         """Start the overlay window in a separate thread."""
         self.thread = threading.Thread(target=self._run)
         self.thread.daemon = True
         self.thread.start()
         time.sleep(0.5)  # Give the window time to initialize
-        
+
     def _run(self):
         """Run the tkinter window."""
         self.root = tk.Tk()
-        self.root.title("ERICAD Overlay")
-        
+        self.root.title('ERICAD Overlay')
+
         # Make window fullscreen and transparent
         self.root.attributes('-fullscreen', True)
         self.root.attributes('-topmost', True)
         self.root.attributes('-alpha', 0.3)
         self.root.configure(bg='black')
-        
+
         # Make window click-through
         self.root.wm_attributes('-transparentcolor', 'black')
-        
+
         # Create canvas
         self.canvas = tk.Canvas(
-            self.root, 
-            bg='black', 
+            self.root,
+            bg='black',
             highlightthickness=0,
             width=self.root.winfo_screenwidth(),
             height=self.root.winfo_screenheight()
         )
         self.canvas.pack()
-        
+
         self.running = True
         self.root.after(100, self._update)
         self.root.mainloop()
-        
+
     def _update(self):
         """Update the overlay display."""
         if self.running:
             self.root.after(100, self._update)
-            
+
     def show_highlights(self, highlights, duration=5):
         """Show highlights on screen for a specified duration."""
         if not self.running or not self.canvas:
             return
-            
+
         def draw():
             # Clear previous highlights
             self.canvas.delete("all")
-            
+
             # Get screen dimensions
             screen_width = self.root.winfo_screenwidth()
             screen_height = self.root.winfo_screenheight()
-            
+
             # Draw new highlights
             for h in highlights:
                 x0 = int(h['x0'] * screen_width)
                 y0 = int(h['y0'] * screen_height)
                 x1 = int(h['x1'] * screen_width)
                 y1 = int(h['y1'] * screen_height)
-                
+
                 # Draw rectangle
                 self.canvas.create_rectangle(
                     x0, y0, x1, y1,
@@ -206,7 +196,7 @@ class OverlayWindow:
                     width=3,
                     tags="highlight"
                 )
-                
+
                 # Draw label if exists
                 if 'label' in h:
                     self.canvas.create_text(
@@ -217,12 +207,12 @@ class OverlayWindow:
                         font=('Arial', 12, 'bold'),
                         tags="highlight"
                     )
-            
+
             # Schedule removal
             self.root.after(duration * 1000, lambda: self.canvas.delete("highlight"))
-            
+
         self.root.after(0, draw)
-        
+
     def stop(self):
         """Stop the overlay window."""
         self.running = False
