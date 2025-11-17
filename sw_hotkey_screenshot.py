@@ -1,268 +1,349 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Thu Nov 13 12:23:58 2025
-
-@author: kamal
-"""
-
-# sw_hotkey_screenshot.py
-
 import os
 import datetime
 import mss
 import mss.tools
 import keyboard
-import base64 
+import base64
+import win32com.client
+import pythoncom
 from openai import OpenAI
+import time
 
-MODEL_NAME = "gpt-5.1"
-
-ERICAD_SYSTEM_PROMPT = (
-"""
-You are ERICAD — an expert SolidWorks engineer and on-screen debugging companion. 
-Your job is to look at the user’s screenshot, understand the exact SolidWorks state, 
-and guide them step-by-step with precise, grounded instructions. 
-Your tone is concise, confident, fluent, and calm — like a senior CAD mentor, 
-not a chatbot or customer service script.
-
-====================================================
-CORE BEHAVIOR
-====================================================
-
-1) MULTI-TURN CHAT
-You are in an ongoing conversation. 
-- The FIRST message you send in a new session may be structured.
-- AFTER the first message, your responses must be NATURAL and conversational. 
-- Do NOT repeat headings like “Visual summary” or “Diagnosis” in multi-turn chat.
-- Adapt based on what the user just did or asked.
-- If the user is clearly following earlier instructions, continue smoothly.
-
-2) VISUAL GROUNDING (REQUIRED)
-You MUST base your reasoning on what you SEE in the screenshot.  
-Never ignore the image. Never assume tools or buttons that are not visible.
-
-At the start of every response, do **one** of the following:
-- Briefly state 1–2 visually obvious things you see that matter for the current step, OR
-- If continuing a multi-turn conversation and nothing changed visually, 
-  reference the latest visible state naturally (“You’re still in part mode…”).
-
-You MUST NOT:
-- Mention the Exit Sketch button unless it is literally visible in the screenshot.
-- Mention the Sketch tab unless it is clearly active.
-- Mention any tool, tab, or UI element not present in the image unless you are giving instructions on how to navigate to it.
-
-3) SOLIDWORKS MODE DETECTION (CRITICAL)
-Before giving instructions, determine the user’s actual mode:
-- editing a sketch
-- editing a feature
-- part modeling mode
-- assembly mode
-- drawing mode
-- or not editing anything
-
-Rules:
-- If sketch entities aren’t visible AND the Sketch tab isn’t active AND the Exit Sketch button isn’t visible → the user is NOT editing a sketch.
-- If the graphics area shows only solid geometry → they are NOT editing a sketch.
-- If you can’t confidently determine the mode, ask exactly ONE clarifying question.
-
-4) ACTIONABLE GUIDANCE
-Your job is to tell the user the SINGLE most likely next step.
-
-Guidelines:
-- Give a short explanation (1–2 sentences max).
-- Then give 2–5 precise steps, each starting with a verb (e.g., “Right-click…”, “Select…”, “Open…”).
-- If you need to mention menus: specify the exact tab (Features/Sketch/Assembly) and the visible icon if possible.
-- Never dump long theory.
-- Never propose multiple branching solutions unless the user asks.
-
-5) UNCERTAINTY & QUESTIONS
-If you are <80% confident OR the screenshot is ambiguous:
-- Ask ONE clarifying question.
-- Do NOT try to guess multiple possibilities.
-- Do NOT offer a full solution until you understand the mode/state.
-
-6) NO HALLUCINATIONS (STRICT)
-You must NEVER:
-- Invent tools, buttons, tabs, or commands.
-- Invent features in the tree.
-- Claim that something is “visible” when it is not clearly visible.
-- Give instructions to click a button that does not appear in the screenshot.
-
-If something required is missing from the UI:
-Say naturally: 
-“It looks like you’re not in sketch edit mode, so that button isn’t available yet. Here’s how to enter it…”
-
-7) FLUENCY & PERSONA
-- Write like a calm, experienced CAD engineer standing behind the user.
-- Be brief but highly fluent.
-- No filler phrases (“As an AI…”, “I understand your issue…”).
-- Never restate the user’s description.
-- Never write long paragraphs.
-
-8) OPTIONAL HIGHLIGHT JSON (only if requested in prompt)
-If the user or system requests UI highlights, append a fenced JSON block:
-```json
-{
-  "highlights": [
-    { "label": "name", "x0": 0.32, "y0": 0.20, "x1": 0.41, "y1": 0.27 }
-  ]
-}
-"""    
-)
+MODEL_NAME = "gpt-5.1"  # Updated model name
 
 
-def get_desktop_path() -> str:
-    """Return your Desktop path (normal or OneDrive)."""
-    candidates = [
-        os.path.join(os.path.expanduser("~"), "Desktop"),
-        os.path.join(os.path.expanduser("~"), "OneDrive", "Desktop"),
-        os.path.join(os.path.expanduser("~"), "OneDrive - Personal", "Desktop"),
-    ]
-    for path in candidates:
-        if os.path.exists(path):
-            return path
-    raise RuntimeError("Could not find your Desktop folder.")
+class SolidWorksAssistant:
+    def __init__(self):
+        self.client = OpenAI()
+        self.swApp = None
+        self.connect_to_solidworks()
 
+    def connect_to_solidworks(self):
+        """Connect to running SolidWorks instance"""
+        try:
+            pythoncom.CoInitialize()
 
-def capture_screen():
-    """Capture the screen, save a timestamped PNG, and return its path."""
-    desktop = get_desktop_path()
-    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"solidworks_screenshot_{timestamp}.png"
-    full_path = os.path.join(desktop, filename)
+            # Try to connect
+            for attempt in range(3):
+                try:
+                    self.swApp = win32com.client.Dispatch("SldWorks.Application")
+                    if self.swApp:
+                        break
+                except:
+                    print(f"[!] Connection attempt {attempt + 1} failed")
+                    time.sleep(1)
 
-    with mss.mss() as sct:
-        monitor = sct.monitors[1]
-        screenshot = sct.grab(monitor)
-        mss.tools.to_png(screenshot.rgb, screenshot.size, output=full_path)
+            if self.swApp:
+                print("[✓] Connected to SolidWorks")
+                self.swApp.Visible = True
 
-    print(f"\n[✓] Screenshot saved: {full_path}")
-    return full_path
+                # Test the connection
+                try:
+                    # This might fail if no document is open, which is OK
+                    doc_count = self.swApp.GetDocumentCount()
+                    print(f"[✓] SolidWorks has {doc_count} document(s) open")
+                except:
+                    print("[✓] SolidWorks connected (no documents open)")
+            else:
+                print("[!] Could not connect to SolidWorks. Make sure it's running.")
 
+        except Exception as e:
+            print(f"[ERROR] Connection failed: {e}")
+            self.swApp = None
 
-def image_path_to_b64(image_path: str) -> str:
-    """Read image from disk and return base64-encoded string."""
-    if not os.path.exists(image_path):
-        raise FileNotFoundError(f"Screenshot file not found at: {image_path}")
-    with open(image_path, "rb") as image_file:
-        return base64.b64encode(image_file.read()).decode("utf-8")
+class SolidWorksAssistant:
+    def __init__(self):
+        self.client = OpenAI()
+        self.swApp = None
+        self.connect_to_solidworks()
 
+    def connect_to_solidworks(self):
+        """Connect to running SolidWorks instance"""
+        try:
+            pythoncom.CoInitialize()
+            self.swApp = win32com.client.Dispatch("SldWorks.Application")
+            if self.swApp:
+                print("[✓] Connected to SolidWorks")
+                # Make SW visible if hidden
+                self.swApp.Visible = True
+            else:
+                print("[!] SolidWorks not running. Please start SolidWorks first.")
+        except Exception as e:
+            print(f"[ERROR] Could not connect to SolidWorks: {e}")
 
-def send_to_ai(
-    b64_image: str,
-    conversation_history: list,
-    user_message: str,
-) -> str:
-    """
-    Send screenshot + conversation + latest user message to ERICAD and return the reply.
+    def get_sw_state(self):
+        """Get detailed SolidWorks state information"""
+        if not self.swApp:
+            return {"mode": "Not connected", "error": "SolidWorks not connected"}
 
-    conversation_history is a list of (role, text) where role is "user" or "assistant".
-    """
-
-    # Build a compact text version of the conversation so far
-    history_lines = []
-    for role, text in conversation_history:
-        prefix = "User:" if role == "user" else "ERICAD:"
-        history_lines.append(f"{prefix} {text}")
-
-    history_block = ""
-    if history_lines:
-        history_block = "Conversation so far:\n" + "\n".join(history_lines) + "\n\n"
-
-    full_text = (
-        history_block
-        + "New user message:\n"
-        + user_message
-        + "\n\nUse the screenshot and the conversation context to respond."
-    )
-
-    client = OpenAI()
-
-    response = client.responses.create(
-        model=MODEL_NAME,
-        instructions=ERICAD_SYSTEM_PROMPT,
-        input=[
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "input_text",
-                        "text": full_text,
-                    },
-                    {
-                        "type": "input_image",
-                        "image_url": f"data:image/png;base64,{b64_image}",
-                    },
-                ],
-            }
-        ],
-    )
-
-    return response.output_text
-
-
-def handle_f8():
-    """
-    F8 handler: start a chat session tied to a single screenshot.
-
-    You can send multiple messages until you type /done, /exit, or /new.
-    """
-    image_path = capture_screen()
-
-    try:
-        b64_image = image_path_to_b64(image_path)
-    except Exception as e:
-        print(f"\n[ERROR] Could not read screenshot: {e}")
-        return
-
-    conversation_history = []
-
-    print(
-        "\nERICAD chat session started for this screenshot."
-        "\nType your question or description below."
-        "\nType /done, /exit, or /new to end this session.\n"
-    )
-
-    while True:
-        user_message = input("You: ").strip()
-
-        if user_message.lower() in ("/done", "/exit", "/new"):
-            print("\n[✓] Ending ERICAD session for this screenshot.")
-            print("[Hint] Press F8 to start a new session, or F9 to quit.\n")
-            break
-
-        if not user_message:
-            # ignore blank lines
-            continue
+        state = {
+            "mode": "Unknown",
+            "document_type": None,
+            "active_doc_name": None,
+            "is_in_edit_mode": False,
+            "active_feature": None,
+            "selection_count": 0,
+            "available_commands": []
+        }
 
         try:
-            ai_response = send_to_ai(b64_image, conversation_history, user_message)
+            # Check if SolidWorks has any documents open
+            doc_count = 0
+            try:
+                doc_count = self.swApp.GetDocumentCount()
+            except:
+                pass
+
+            if doc_count == 0:
+                state["mode"] = "No document open"
+                state["available_commands"] = ["New Part", "New Assembly", "New Drawing", "Open"]
+                return state
+
+            # Try to get active document
+            swModel = None
+            try:
+                swModel = self.swApp.ActiveDoc
+            except Exception as e:
+                # Try alternative method
+                try:
+                    # Get first document if ActiveDoc fails
+                    swModel = self.swApp.GetFirstDocument()
+                except:
+                    state["mode"] = "Cannot access document"
+                    return state
+
+            if not swModel:
+                state["mode"] = "No active document"
+                return state
+
+            # Get document info using safe methods
+            try:
+                doc_type = swModel.GetType()  # Note: GetType() not GetType
+                doc_types = {1: "Part", 2: "Assembly", 3: "Drawing"}
+                state["document_type"] = doc_types.get(doc_type, "Unknown")
+            except:
+                state["document_type"] = "Unknown"
+
+            try:
+                state["active_doc_name"] = swModel.GetTitle()  # Note: GetTitle() not GetTitle
+            except:
+                state["active_doc_name"] = "Untitled"
+
+            # Check sketch mode safely
+            try:
+                swSketchMgr = swModel.SketchManager
+                active_sketch = swSketchMgr.ActiveSketch
+                if active_sketch:
+                    state["mode"] = "Sketch Edit Mode"
+                    state["is_in_edit_mode"] = True
+                    try:
+                        state["active_feature"] = active_sketch.Name
+                    except:
+                        state["active_feature"] = "Active Sketch"
+
+                    state["available_commands"] = [
+                        "Line", "Circle", "Rectangle", "Arc", "Spline",
+                        "Smart Dimension", "Relations", "Trim", "Extend",
+                        "Exit Sketch"
+                    ]
+                else:
+                    state["mode"] = f"{state['document_type']} Mode"
+            except:
+                state["mode"] = "Document open"
+
+            # Get selection info safely
+            try:
+                swSelMgr = swModel.SelectionManager
+                sel_count = swSelMgr.GetSelectedObjectCount2(-1)
+                state["selection_count"] = sel_count
+            except:
+                state["selection_count"] = 0
+
+            # Set available commands based on document type
+            if state["mode"] != "Sketch Edit Mode":
+                if state["document_type"] == "Part":
+                    state["available_commands"] = [
+                        "Sketch", "Extrude", "Revolve", "Cut-Extrude", "Fillet"
+                    ]
+                elif state["document_type"] == "Assembly":
+                    state["available_commands"] = [
+                        "Insert Component", "Mate", "Pattern", "Exploded View"
+                    ]
+
         except Exception as e:
-            print("\n[ERROR] Something went wrong talking to ERICAD:")
-            print(e)
-            break
+            print(f"[WARNING] Error getting some SW state info: {e}")
+            # Return what we have
 
-        # Update conversation history
-        conversation_history.append(("user", user_message))
-        conversation_history.append(("assistant", ai_response))
+        return state
 
-        print("\nERICAD:\n")
-        print(ai_response)
-        print("\n-----------------------------\n")
+    def execute_command(self, command):
+        """Execute SolidWorks commands directly"""
+        if not self.swApp or not self.swApp.ActiveDoc:
+            return False, "No active document"
+
+        try:
+            swModel = self.swApp.ActiveDoc
+
+            # Map common commands
+            if command.lower() == "new sketch":
+                swModel.SketchManager.InsertSketch(True)
+                return True, "Started new sketch"
+
+            elif command.lower() == "exit sketch":
+                swModel.SketchManager.InsertSketch(False)
+                return True, "Exited sketch"
+
+            elif command.lower() == "zoom to fit":
+                swModel.ViewZoomtofit2()
+                return True, "Zoomed to fit"
+
+            elif command.lower() == "rebuild":
+                swModel.ForceRebuild3(True)
+                return True, "Model rebuilt"
+
+            # Add more commands as needed
+
+        except Exception as e:
+            return False, str(e)
+
+        return False, "Unknown command"
+
+    def capture_screen_with_context(self):
+        """Capture screenshot and include SW state data"""
+        # Take screenshot
+        with mss.mss() as sct:
+            screenshot = sct.shot()
+
+        # Get SW state
+        sw_state = self.get_sw_state()
+
+        # Convert screenshot to base64
+        with open(screenshot, "rb") as f:
+            b64_image = base64.b64encode(f.read()).decode('utf-8')
+
+        # Clean up
+        os.remove(screenshot)
+
+        return b64_image, sw_state
+
+    def send_to_ai(self, b64_image, sw_state, conversation_history, user_message):
+        """Send to AI with both visual and API context"""
+
+        # Build context message
+        context_msg = f"""
+Current SolidWorks State:
+- Mode: {sw_state['mode']}
+- Document Type: {sw_state['document_type']}
+- Document: {sw_state['active_doc_name']}
+- In Edit Mode: {sw_state['is_in_edit_mode']}
+- Selection Count: {sw_state['selection_count']}
+- Available Commands: {', '.join(sw_state['available_commands'][:5])}...
+
+User Question: {user_message}
+"""
+
+        messages = [
+            {
+                "role": "system",
+                "content": """You are ERICAD, a SolidWorks assistant with direct API access.
+You can see both the screenshot AND the exact SolidWorks state from the API.
+You can execute commands directly if the user wants.
+
+When giving instructions:
+1. Use the API state data to be extremely precise
+2. Reference the exact mode and available tools
+3. If user wants, you can execute commands directly
+4. Never guess about UI state - you have the exact data"""
+            }
+        ]
+
+        # Add conversation history
+        for role, content in conversation_history[-6:]:  # Last 3 exchanges
+            messages.append({"role": role, "content": content})
+
+        # Add current message with image and context
+        messages.append({
+            "role": "user",
+            "content": [
+                {"type": "text", "text": context_msg},
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:image/png;base64,{b64_image}",
+                        "detail": "high"
+                    }
+                }
+            ]
+        })
+
+        response = self.client.chat.completions.create(
+            model=MODEL_NAME,
+            messages=messages,
+            max_completion_tokens=500  # FIXED PARAMETER NAME
+        )
+
+        return response.choices[0].message.content
+
+    def interactive_session(self, b64_image, sw_state):
+        """Run interactive chat session"""
+        conversation_history = []
+
+        print("\n[Session Started]")
+        print(f"SolidWorks State: {sw_state['mode']} | Doc: {sw_state['active_doc_name']}")
+        print("Type your question (or /done to end, /exec <command> to execute):\n")
+
+        while True:
+            user_message = input("You: ").strip()
+
+            if user_message.lower() == "/done":
+                break
+
+            if user_message.lower().startswith("/exec "):
+                # Execute command directly
+                command = user_message[6:]
+                success, result = self.execute_command(command)
+                print(f"\n[Command Result] {result}\n")
+                continue
+
+            if not user_message:
+                continue
+
+            try:
+                # Get fresh state for each message
+                sw_state = self.get_sw_state()
+                ai_response = self.send_to_ai(
+                    b64_image, sw_state, conversation_history, user_message
+                )
+
+                conversation_history.append(("user", user_message))
+                conversation_history.append(("assistant", ai_response))
+
+                print(f"\nERICAD:\n{ai_response}\n")
+                print("-" * 30)
+
+            except Exception as e:
+                print(f"\n[ERROR] {e}\n")
 
 
 def main():
-    print("ERICAD Hotkey Tool Running (Chat Mode)")
-    print("Press F8 to capture + start a chat for that screenshot.")
-    print("Inside a session, type /done to end it.")
-    print("Press F9 to quit the program.\n")
+    print("ERICAD - SolidWorks AI Assistant (API Version)")
+    print("Press F8 to capture screen and start assistance")
+    print("Press F9 to quit\n")
+
+    assistant = SolidWorksAssistant()
+
+    def handle_f8():
+        if not assistant.swApp:
+            print("[!] SolidWorks not connected")
+            return
+
+        print("\n[Capturing...]")
+        b64_image, sw_state = assistant.capture_screen_with_context()
+        assistant.interactive_session(b64_image, sw_state)
 
     keyboard.add_hotkey("F8", handle_f8)
-
-    # Wait until F9 is pressed
     keyboard.wait("F9")
     print("\n[✓] Quitting ERICAD...")
-    raise SystemExit
 
 
 if __name__ == "__main__":
