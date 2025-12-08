@@ -1,0 +1,9 @@
+PyQt5
+google-generativeai
+mss
+opencv-python
+numpy
+SpeechRecognition
+openai
+pywin32
+pyaudio
