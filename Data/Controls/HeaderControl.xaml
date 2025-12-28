@@ -1,0 +1,70 @@
+<UserControl x:Class="Frontend.Controls.HeaderControl"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Name="Root">
+    
+    <Border x:Name="DragHandle" 
+            Background="#20FFFFFF" 
+            CornerRadius="12,12,0,0"
+            Cursor="SizeAll"
+            MouseLeftButtonDown="DragHandle_MouseLeftButtonDown"
+            MouseMove="DragHandle_MouseMove"
+            MouseLeftButtonUp="DragHandle_MouseLeftButtonUp">
+        <Grid Margin="16,12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            
+            <StackPanel Grid.Column="0">
+                <TextBlock Text="ERICAD" Foreground="#FF6B35" FontFamily="Segoe UI Black" FontSize="20" FontWeight="Bold"/>
+                <TextBlock x:Name="ModeIndicator" Text="AI Assistant" Foreground="#666666" FontSize="9" Margin="0,-2,0,0"/>
+            </StackPanel>
+            
+            <!-- Window Controls -->
+            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Top" Margin="0,-4,0,0">
+                <ToggleButton x:Name="MinimizeToggle" Content="—" Width="24" Height="24"
+                              Background="Transparent" Foreground="#888888" BorderThickness="0"
+                              Cursor="Hand" ToolTip="Minimize Panel" Click="MinimizeToggle_Click">
+                    <ToggleButton.Template>
+                        <ControlTemplate TargetType="ToggleButton">
+                            <Border x:Name="bg" Background="{TemplateBinding Background}" CornerRadius="4">
+                                <TextBlock Text="{TemplateBinding Content}" 
+                                           HorizontalAlignment="Center" 
+                                           VerticalAlignment="Center"
+                                           FontFamily="Segoe UI Symbol"
+                                           FontSize="12"/>
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="bg" Property="Background" Value="#33FFFFFF"/>
+                                </Trigger>
+                                <Trigger Property="IsChecked" Value="True">
+                                    <Setter TargetName="bg" Property="Background" Value="#44FF6B35"/>
+                                    <Setter Property="Foreground" Value="#FF6B35"/>
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </ToggleButton.Template>
+                </ToggleButton>
+                <Button Content="✕" Width="24" Height="24" Margin="4,0,0,0"
+                        Background="Transparent" Foreground="#FF6666" BorderThickness="0" 
+                        Cursor="Hand" Click="CloseButton_Click" ToolTip="Close ERICAD">
+                    <Button.Template>
+                        <ControlTemplate TargetType="Button">
+                            <Border x:Name="bg" Background="Transparent" CornerRadius="4">
+                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="bg" Property="Background" Value="#44FF0000"/>
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Button.Template>
+                </Button>
+            </StackPanel>
+        </Grid>
+    </Border>
+</UserControl>
+
