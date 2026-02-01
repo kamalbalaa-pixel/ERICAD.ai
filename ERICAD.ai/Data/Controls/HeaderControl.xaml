@@ -1,0 +1,126 @@
+<UserControl x:Class="Frontend.Controls.HeaderControl"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Name="Root">
+    
+    <Border x:Name="DragHandle" 
+            Background="#252526" 
+            CornerRadius="8,8,0,0"
+            BorderBrush="#3C3C3C"
+            BorderThickness="0,0,0,1"
+            Cursor="SizeAll"
+            MouseLeftButtonDown="DragHandle_MouseLeftButtonDown"
+            MouseMove="DragHandle_MouseMove"
+            MouseLeftButtonUp="DragHandle_MouseLeftButtonUp">
+        <Grid Margin="12,8">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            
+            <!-- Logo -->
+            <TextBlock Grid.Column="0" Text="Splyn" Foreground="#CCCCCC" FontFamily="Segoe UI" FontSize="13" FontWeight="Medium" VerticalAlignment="Center"/>
+            
+            <!-- Controls -->
+            <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                
+                <!-- Voice Toggle -->
+                <ToggleButton x:Name="VoiceToggle" Width="48" Height="28" Margin="0,0,6,0"
+                              Cursor="Hand" ToolTip="Toggle Voice" Click="VoiceToggle_Click">
+                    <ToggleButton.Template>
+                        <ControlTemplate TargetType="ToggleButton">
+                            <Border x:Name="ToggleBg" Background="#2D2D30" CornerRadius="14" Padding="4">
+                                <Grid>
+                                    <Ellipse x:Name="Knob" Width="20" Height="20" Fill="#4A4A4D" HorizontalAlignment="Left">
+                                        <Ellipse.RenderTransform>
+                                            <TranslateTransform x:Name="KnobTransform" X="0"/>
+                                        </Ellipse.RenderTransform>
+                                    </Ellipse>
+                                    <!-- Mic Icon (simplified) -->
+                                    <Path x:Name="MicIcon" Data="M8,1 A2,2 0 0 1 10,3 L10,8 A2,2 0 0 1 6,8 L6,3 A2,2 0 0 1 8,1 M4,7 L4,8 A4,4 0 0 0 12,8 L12,7 M8,12 L8,14 M6,14 L10,14" 
+                                          Stroke="#858585" StrokeThickness="1.2" Fill="Transparent"
+                                          Width="16" Height="16" Stretch="Uniform"
+                                          HorizontalAlignment="Left" Margin="2,0,0,0"/>
+                                </Grid>
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsChecked" Value="True">
+                                    <Setter TargetName="Knob" Property="HorizontalAlignment" Value="Right"/>
+                                    <Setter TargetName="MicIcon" Property="Stroke" Value="#FFFFFF"/>
+                                    <Setter TargetName="MicIcon" Property="HorizontalAlignment" Value="Right"/>
+                                    <Setter TargetName="MicIcon" Property="Margin" Value="0,0,2,0"/>
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </ToggleButton.Template>
+                </ToggleButton>
+                
+                <!-- End Button -->
+                <Button x:Name="EndButton" Height="28" Margin="0,0,6,0" Padding="8,0,12,0"
+                        Cursor="Hand" ToolTip="End Session" Click="EndButton_Click">
+                    <Button.Template>
+                        <ControlTemplate TargetType="Button">
+                            <Border x:Name="EndBg" Background="#3C3C3C" CornerRadius="14">
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="8,0,12,0">
+                                    <Border Width="16" Height="16" Background="#CCCCCC" CornerRadius="3" Margin="0,0,6,0">
+                                        <Rectangle Width="8" Height="8" Fill="#3C3C3C" RadiusX="1" RadiusY="1"/>
+                                    </Border>
+                                    <TextBlock Text="End" Foreground="#CCCCCC" FontSize="13" FontWeight="Medium" VerticalAlignment="Center"/>
+                                </StackPanel>
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="EndBg" Property="Background" Value="#4A4A4D"/>
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Button.Template>
+                </Button>
+                
+                <!-- Minimize Toggle -->
+                <ToggleButton x:Name="MinimizeToggle" Width="28" Height="28" Margin="0,0,2,0"
+                              Background="Transparent" Foreground="#858585" BorderThickness="0"
+                              Cursor="Hand" ToolTip="Minimize Panel" Click="MinimizeToggle_Click">
+                    <ToggleButton.Template>
+                        <ControlTemplate TargetType="ToggleButton">
+                            <Border x:Name="bg" Background="Transparent" CornerRadius="4">
+                                <Path Data="M5,12 L19,12" Stroke="{TemplateBinding Foreground}" StrokeThickness="1.5"
+                                      Width="14" Height="14" Stretch="Uniform"
+                                      HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="bg" Property="Background" Value="#3C3C3C"/>
+                                    <Setter Property="Foreground" Value="#CCCCCC"/>
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </ToggleButton.Template>
+                </ToggleButton>
+                
+                <!-- Close Button -->
+                <Button Width="28" Height="28"
+                        Background="Transparent" Foreground="#858585" BorderThickness="0" 
+                        Cursor="Hand" Click="CloseButton_Click" ToolTip="Close">
+                    <Button.Template>
+                        <ControlTemplate TargetType="Button">
+                            <Border x:Name="bg" Background="Transparent" CornerRadius="4">
+                                <Path Data="M18,6 L6,18 M6,6 L18,18" Stroke="{TemplateBinding Foreground}" StrokeThickness="1.5"
+                                      Width="14" Height="14" Stretch="Uniform"
+                                      HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="bg" Property="Background" Value="#3C3C3C"/>
+                                    <Setter Property="Foreground" Value="#CCCCCC"/>
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Button.Template>
+                </Button>
+            </StackPanel>
+        </Grid>
+    </Border>
+</UserControl>
+
